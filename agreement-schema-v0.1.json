@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://consenti.ai/schemas/agreement/v0.1.json",
+  "title": "Consenti Agreement Protocol v0.1",
+  "description": "Canonical schema for cryptographically verifiable terms acceptance — by humans or agents — with third-party proof. Transport-agnostic. Chain-agnostic. Zero-custody by construction. Terms before transactions.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "agreement_id",
+    "created_at",
+    "publisher",
+    "acceptor",
+    "terms_ref",
+    "canonicalization"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "const": "consenti/v0.1",
+      "description": "Protocol version identifier. Immutable per-record."
+    },
+    "agreement_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{16,128}$",
+      "description": "Globally unique identifier for this acceptance record. SHOULD be a UUIDv7 or ULID for time-orderability."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC 3339 timestamp of record creation (UTC)."
+    },
+    "expires_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "RFC 3339 timestamp after which this acceptance is no longer in force. Null = no expiry."
+    },
+
+    "publisher": {
+      "type": "object",
+      "required": ["identifier"],
+      "description": "The entity that published the terms — the company, service, or platform whose T&C are being accepted.",
+      "properties": {
+        "identifier": {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["domain", "did", "url", "email", "custom"],
+              "description": "Identifier scheme for the publisher."
+            },
+            "value": {
+              "type": "string",
+              "description": "Identifier value (e.g., 'anytech365.com', 'did:web:example.com')."
+            }
+          }
+        },
+        "display_name": {
+          "type": ["string", "null"],
+          "description": "Human-readable publisher name for dashboard display."
+        }
+      }
+    },
+
+    "acceptor": {
+      "type": "object",
+      "required": ["acceptor_type", "identifier", "accepted_at"],
+      "description": "The party that accepted the terms. Can be a human or an agent. Both produce identical log entries in the dashboard.",
+      "properties": {
+        "acceptor_type": {
+          "type": "string",
+          "enum": ["human", "agent"],
+          "description": "Whether the acceptor is a human user or an AI agent. Determines display grouping in the dashboard but does not affect verification."
+        },
+        "identifier": {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["email", "ip_address", "session_id", "did", "agent_id", "eth_address", "url", "custom"],
+              "description": "Identifier scheme. Humans typically identified by email, IP, or session. Agents by agent_id, DID, or URL."
+            },
+            "value": {
+              "type": "string",
+              "description": "Identifier value."
+            }
+          }
+        },
+        "display_name": {
+          "type": ["string", "null"],
+          "description": "Human-readable name for dashboard display (e.g., 'John Smith', 'Stripe Payment Agent v2.1')."
+        },
+        "accepted_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339 timestamp of acceptance."
+        },
+        "ip_address": {
+          "type": ["string", "null"],
+          "description": "IP address at time of acceptance (human acceptors). Null for agents."
+        },
+        "user_agent": {
+          "type": ["string", "null"],
+          "description": "Browser user-agent string (human acceptors) or agent framework identifier (agent acceptors)."
+        }
+      }
+    },
+
+    "terms_ref": {
+      "type": "object",
+      "required": ["terms_hash", "terms_url"],
+      "description": "Reference to the specific version of terms that were accepted. Addressed by content hash so the exact version is always recoverable.",
+      "properties": {
+        "terms_hash": {
+          "type": "string",
+          "description": "SHA-256 hash of the canonicalized terms document. Immutable link between acceptance record and exact terms version."
+        },
+        "terms_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL where the terms were published at time of acceptance."
+        },
+        "terms_version": {
+          "type": ["string", "null"],
+          "description": "Human-readable version label (e.g., 'v4.2', '2026-04-01'). Informational — terms_hash is authoritative."
+        },
+        "terms_title": {
+          "type": ["string", "null"],
+          "description": "Title of the terms document for dashboard display (e.g., 'API Terms of Service', 'Data Processing Agreement')."
+        }
+      }
+    },
+
+    "acceptance_method": {
+      "type": "string",
+      "enum": ["checkbox_click", "button_click", "scroll_accept", "api_commit", "agent_protocol", "signature", "custom"],
+      "description": "How the acceptor indicated acceptance. 'checkbox_click' and 'button_click' for human web flows. 'agent_protocol' for agents accepting via the Consenti protocol. 'api_commit' for programmatic acceptance."
+    },
+
+    "proof_of_understanding": {
+      "type": ["object", "null"],
+      "description": "Optional PoU attestation. Demonstrates comprehension of terms by the acceptor. Available when Encrypted Cloud Mode is enabled.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["ai_assistant_qa", "key_points_checklist", "comprehension_quiz", "ai_summary_confirmation", "custom"],
+          "description": "How understanding was verified. 'ai_assistant_qa' = acceptor asked questions of an AI assistant about the terms before accepting. 'key_points_checklist' = acceptor confirmed each key point."
+        },
+        "attested_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence_hash": {
+          "type": "string",
+          "description": "Hash of attestation evidence (Q&A transcript, checklist confirmations, quiz responses). Evidence held by the service, not on-chain."
+        },
+        "score": {
+          "type": ["number", "null"],
+          "description": "Normalized score 0.0–1.0 if method produces one."
+        }
+      }
+    },
+
+    "jurisdiction": {
+      "type": ["object", "null"],
+      "description": "Declared governing law. Informational for dashboard; dispositive for dispute resolution.",
+      "properties": {
+        "governing_law": {
+          "type": "string",
+          "description": "ISO 3166-1 alpha-2 country code, optionally with subdivision (e.g., 'US-DE', 'GB', 'ES')."
+        },
+        "legal_basis": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Statutes or regulations invoked (e.g., 'UETA-14', 'ESIGN-7001')."
+        }
+      }
+    },
+
+    "anchoring": {
+      "type": ["object", "null"],
+      "description": "Chain-agnostic anchor metadata. This is the third-party proof — the independent, tamper-proof record that acceptance happened. It is your word AND an independent record, not just your word. Null until anchored.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["pangea", "evm", "bitcoin_op_return", "solana_memo", "rfc3161_tsa", "none"]
+        },
+        "chain_id": {
+          "type": ["string", "null"],
+          "description": "Chain identifier where applicable (e.g., EIP-155 chain ID for EVM)."
+        },
+        "transaction_ref": {
+          "type": ["string", "null"],
+          "description": "Transaction hash, TSA token, or equivalent anchor reference."
+        },
+        "anchored_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "agreement_hash": {
+          "type": "string",
+          "description": "SHA-256 hash of the canonicalized acceptance record (excluding anchoring, signatures, and privacy derived fields)."
+        }
+      }
+    },
+
+    "signatures": {
+      "type": ["array", "null"],
+      "description": "Optional cryptographic signatures. Required for agent acceptors. For human checkbox/click acceptance, the anchored record itself serves as proof. Excluded from agreement_hash computation.",
+      "items": {
+        "type": "object",
+        "required": ["signer", "algorithm", "signature", "signed_at"],
+        "properties": {
+          "signer": {
+            "type": "string",
+            "enum": ["publisher", "acceptor"],
+            "description": "Which party produced this signature."
+          },
+          "algorithm": {
+            "type": "string",
+            "enum": ["ES256", "ES256K", "EdDSA", "RS256", "secp256k1-personal"]
+          },
+          "public_key_ref": {
+            "type": "string",
+            "description": "DID verification method, JWK thumbprint, or key reference."
+          },
+          "signature": {
+            "type": "string",
+            "description": "Base64url-encoded signature over the canonical agreement hash."
+          },
+          "signed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+
+    "privacy": {
+      "type": ["object", "null"],
+      "description": "Privacy and confidentiality controls. See companion spec: agreement-privacy-architecture.md.",
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": ["selective_disclosure", "full_encryption", "public"],
+          "description": "Privacy model. 'public' is default for standard T&C acceptance. 'selective_disclosure' for sensitive agreements."
+        },
+        "merkle_tree": {
+          "type": ["object", "null"],
+          "description": "Clause-level Merkle tree for selective disclosure.",
+          "properties": {
+            "algorithm": { "type": "string", "const": "SHA-256" },
+            "leaf_construction": {
+              "type": "string",
+              "const": "jcs_path_value"
+            },
+            "root": { "type": "string" }
+          }
+        },
+        "anchor_commitment": {
+          "type": ["object", "null"],
+          "description": "What is committed to the public anchor. Only hashes — never plaintext.",
+          "properties": {
+            "agreement_hash": { "type": "string" },
+            "merkle_root": { "type": ["string", "null"] },
+            "acceptor_hash": {
+              "type": "string",
+              "description": "SHA-256(acceptor_identifier). NOT the identifier itself."
+            }
+          }
+        }
+      }
+    },
+
+    "canonicalization": {
+      "type": "object",
+      "required": ["method", "hash_algorithm"],
+      "description": "How the acceptance record is canonicalized prior to hashing and signing. MUST be deterministic.",
+      "properties": {
+        "method": {
+          "type": "string",
+          "const": "RFC8785",
+          "description": "JSON Canonicalization Scheme (JCS)."
+        },
+        "hash_algorithm": {
+          "type": "string",
+          "const": "SHA-256"
+        },
+        "excluded_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["anchoring", "signatures", "privacy.anchor_commitment", "privacy.merkle_tree.root"],
+          "description": "Fields excluded from canonicalization prior to hashing."
+        }
+      }
+    },
+
+    "extensions": {
+      "type": ["object", "null"],
+      "description": "Namespace for protocol extensions. Unknown extensions MUST NOT affect verification.",
+      "additionalProperties": true
+    }
+  }
+}
