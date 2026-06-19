@@ -58,7 +58,7 @@ TIMESTAMP           TYPE    ACCEPTOR                    TERMS         STATUS
 
 | Document | Description |
 |---|---|
-| [Agreement Schema v0.1](schemas/agreement-schema-v0.1.json) | Canonical JSON Schema for acceptance records |
+| [Agreement Schema v0.1](https://github.com/consenti-ai/agreement-protocol/blob/main/agreement-schema-v0.1.json) | Canonical JSON Schema for acceptance records |
 | [Discovery Spec v0.1](specs/well-known-agreements-spec.md) | `.well-known/agreements.json` discovery + HTTP 409 enforcement |
 | [Privacy Architecture v0.1](specs/agreement-privacy-architecture.md) | Commitment/content separation, selective disclosure, encrypted vault |
 
