@@ -1,0 +1,34 @@
+{
+  "protocol_version": "consenti/discovery/v0.1",
+  "publisher": {
+    "identifier": { "type": "domain", "value": "anytech365.com" },
+    "display_name": "AnyTech365",
+    "contact": "legal@anytech365.com"
+  },
+  "updated_at": "2026-04-16T00:00:00Z",
+  "terms": [
+    {
+      "terms_ref": "https://anytech365.com/.well-known/agreements/tos-v4.json",
+      "terms_hash": "sha256:3f2a7b9c1d4e8f0a2b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
+      "terms_title": "Terms of Service",
+      "terms_version": "v4",
+      "applies_to": {
+        "paths": ["/*"],
+        "actions": ["service_use", "purchase", "data_access"],
+        "acceptor_types": ["human", "agent"]
+      },
+      "required": true,
+      "effective_from": "2026-04-01T00:00:00Z",
+      "effective_until": null,
+      "summary": "Standard terms for all users and agents accessing AnyTech365 remote IT services.",
+      "human_readable_url": "https://anytech365.com/legal/terms"
+    }
+  ],
+  "acceptance_endpoint": "https://anytech365.com/api/agreements/accept",
+  "verification": {
+    "verifier_urls": [
+      "https://verify.consenti.ai"
+    ],
+    "anchor_chains": ["pangea"]
+  }
+}

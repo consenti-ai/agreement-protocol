@@ -52,15 +52,15 @@ TIMESTAMP           TYPE    ACCEPTOR                    TERMS         STATUS
 - **Zero-custody.** Consenti infrastructure never holds signing keys or (in zero-custody mode) acceptance record content.
 - **Transport-agnostic.** Works over HTTP, MCP, A2A, or any transport that can carry JSON.
 - **Chain-agnostic.** Anchor to Pangea, Ethereum, Bitcoin, Solana, or an RFC 3161 timestamp authority.
-- **Unified human + agent log.** Same schema, same dashboard, same verification — just a `acceptor_type` filter.
+- **Unified human + agent log.** Same schema, same dashboard, same verification — just an `acceptor_type` filter.
 
 ## Specifications
 
 | Document | Description |
 |---|---|
-| [Agreement Schema v0.1](https://github.com/consenti-ai/agreement-protocol/blob/main/agreement-schema-v0.1.json) | Canonical JSON Schema for acceptance records |
-| [Discovery Spec v0.1](https://github.com/consenti-ai/agreement-protocol/blob/main/well-known-agreements-spec.md) | `.well-known/agreements.json` discovery + HTTP 409 enforcement |
-| [Privacy Architecture v0.1](https://github.com/consenti-ai/agreement-protocol/blob/main/agreement-privacy-architecture.md) | Commitment/content separation, selective disclosure, encrypted vault |
+| [Agreement Schema v0.1](schemas/agreement-schema-v0.1.json) | Canonical JSON Schema for acceptance records |
+| [Discovery Spec v0.1](specs/well-known-agreements-spec.md) | `.well-known/agreements.json` discovery + HTTP 409 enforcement |
+| [Privacy Architecture v0.1](specs/agreement-privacy-architecture.md) | Commitment/content separation, selective disclosure, encrypted vault |
 
 ## Reference Verifier
 
@@ -69,13 +69,13 @@ A TypeScript library that independently verifies acceptance records against thei
 ### Install
 
 ```bash
-npm install @consenti/verifier
+npm install @consenti-ai/verifier
 ```
 
 ### Usage
 
 ```typescript
-import { verify, VerificationLevel } from '@consenti/verifier';
+import { verify, VerificationLevel } from '@consenti-ai/verifier';
 
 // Load an acceptance record (from your dashboard, a file, an API response, etc.)
 const record = await fetch('https://example.com/api/agreements/agr_abc123').then(r => r.json());
@@ -106,7 +106,7 @@ if (result.valid) {
 ### Standalone Functions
 
 ```typescript
-import { computeAgreementHash, computeAcceptorHash, canonicalize } from '@consenti/verifier';
+import { computeAgreementHash, computeAcceptorHash, canonicalize } from '@consenti-ai/verifier';
 
 // Compute the canonical hash of an acceptance record
 const hash = computeAgreementHash(record);

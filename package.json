@@ -1,0 +1,39 @@
+{
+  "name": "@consenti-ai/verifier",
+  "version": "0.1.0",
+  "description": "Reference verifier for the Consenti Agreement Protocol. Independently verify terms acceptance records without Consenti infrastructure.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "npx tsx --test test/*.test.ts",
+    "lint": "eslint src/",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "consenti",
+    "agreement",
+    "terms",
+    "verification",
+    "blockchain",
+    "zero-custody",
+    "agentic",
+    "AI",
+    "terms-before-transactions"
+  ],
+  "author": "Consenti (FHBK Technologies, Inc.)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/consenti-ai/agreement-protocol.git"
+  },
+  "homepage": "https://consenti.ai",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.0.0"
+  }
+}
