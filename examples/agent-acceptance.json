@@ -2,45 +2,46 @@
   "protocol_version": "consenti/v0.1",
   "agreement_id": "01JBQX8P2N4RWXEQ6U7AZSIB53",
   "created_at": "2026-04-16T09:17:00Z",
-
   "publisher": {
-    "identifier": { "type": "domain", "value": "anytech365.com" },
+    "identifier": {
+      "type": "domain",
+      "value": "anytech365.com"
+    },
     "display_name": "AnyTech365"
   },
-
   "acceptor": {
     "acceptor_type": "agent",
-    "identifier": { "type": "agent_id", "value": "agent://stripe/payment-agent-v2.1" },
+    "identifier": {
+      "type": "agent_id",
+      "value": "agent://stripe/payment-agent-v2.1"
+    },
     "display_name": "Stripe Payment Agent v2.1",
     "accepted_at": "2026-04-16T09:17:00Z",
     "ip_address": null,
     "user_agent": "stripe-agent-sdk/2.1.0"
   },
-
   "terms_ref": {
     "terms_hash": "sha256:3f2a7b9c1d4e8f0a2b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
     "terms_url": "https://anytech365.com/.well-known/agreements/tos-v4.json",
     "terms_version": "v4",
     "terms_title": "Terms of Service"
   },
-
   "acceptance_method": "agent_protocol",
-
   "proof_of_understanding": null,
-
   "jurisdiction": {
     "governing_law": "ES",
-    "legal_basis": ["UETA-14", "ESIGN-7001"]
+    "legal_basis": [
+      "UETA-14",
+      "ESIGN-7001"
+    ]
   },
-
   "anchoring": {
     "method": "pangea",
     "chain_id": null,
     "transaction_ref": "pgn_tx_f6e5d4c3b2a1",
     "anchored_at": "2026-04-16T09:17:03Z",
-    "agreement_hash": "sha256:b8c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2"
+    "agreement_hash": "sha256:0ae9218746ddb95c0c4450c114a0c44103b1bbd45254a719cf94e3c9f3aeb966"
   },
-
   "signatures": [
     {
       "signer": "acceptor",
@@ -50,14 +51,17 @@
       "signed_at": "2026-04-16T09:17:00Z"
     }
   ],
-
   "privacy": {
     "model": "public"
   },
-
   "canonicalization": {
     "method": "RFC8785",
     "hash_algorithm": "SHA-256",
-    "excluded_fields": ["anchoring", "signatures", "privacy.anchor_commitment", "privacy.merkle_tree.root"]
+    "excluded_fields": [
+      "anchoring",
+      "signatures",
+      "privacy.anchor_commitment",
+      "privacy.merkle_tree.root"
+    ]
   }
 }

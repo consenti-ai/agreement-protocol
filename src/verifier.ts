@@ -5,7 +5,7 @@
  * No Consenti infrastructure required. MIT licensed.
  *
  * Usage:
- *   import { verify, VerificationLevel } from '@consenti/verifier';
+ *   import { verify, VerificationLevel } from '@consenti-ai/verifier';
  *
  *   const result = await verify(acceptanceRecord, {
  *     level: VerificationLevel.ACCEPTANCE_PROOF,
@@ -16,7 +16,7 @@
  *     console.log(`Verified: ${result.acceptor} accepted ${result.termsTitle} at ${result.acceptedAt}`);
  *   }
  *
- * @module @consenti/verifier
+ * @module @consenti-ai/verifier
  * @version 0.1.0
  * @license MIT
  */
@@ -123,7 +123,13 @@ export interface AnchorProvider {
 
 export interface VerifyOptions {
   level: VerificationLevel;
-  anchorProvider: AnchorProvider;
+  /**
+   * Resolves an agreement_hash to its on-chain anchor record.
+   * Optional: if omitted, anchor existence is NOT verified — the verifier
+   * performs structural, hash-consistency, and (at Level 2) signature checks
+   * only, and emits a warning. EXISTENCE-level verification requires a provider.
+   */
+  anchorProvider?: AnchorProvider;
   /** Optional: verify cryptographic signatures (requires key resolver). */
   keyResolver?: (publicKeyRef: string) => Promise<CryptoKey | null>;
   /** Optional: tolerance in seconds for timestamp comparison. Default: 60. */
@@ -304,13 +310,44 @@ export async function verify(
   // ── Step 3: Anchor lookup (Level 0+) ──────────────────────────────────
 
   let anchorRecord: AnchorRecord | null = null;
-  try {
-    anchorRecord = await options.anchorProvider.resolve(agreementHash);
-  } catch (err) {
-    errors.push(`Anchor lookup failed: ${(err as Error).message}`);
+
+  if (!options.anchorProvider) {
+    if (options.level === VerificationLevel.EXISTENCE) {
+      errors.push(
+        'EXISTENCE verification requires an anchorProvider: ' +
+        'existence is defined as presence on the anchor, which cannot be ' +
+        'checked without one.'
+      );
+      return {
+        valid: false,
+        level: options.level,
+        agreementHash,
+        errors,
+        warnings,
+        anchorFound: false,
+        anchoredAt: null,
+        acceptor: null,
+        acceptorType: null,
+        termsHash: null,
+        termsTitle: null,
+        acceptedAt: null,
+        signaturesVerified: null,
+        expired: null,
+      };
+    }
+    warnings.push(
+      'No anchorProvider supplied: anchor existence NOT verified. ' +
+      'Result reflects structural and hash-consistency checks only.'
+    );
+  } else {
+    try {
+      anchorRecord = await options.anchorProvider.resolve(agreementHash);
+    } catch (err) {
+      errors.push(`Anchor lookup failed: ${(err as Error).message}`);
+    }
   }
 
-  if (!anchorRecord) {
+  if (options.anchorProvider && !anchorRecord) {
     errors.push(
       `No anchor found for agreement_hash ${agreementHash} ` +
       `via ${options.anchorProvider.name}. ` +
@@ -342,8 +379,8 @@ export async function verify(
       agreementHash,
       errors,
       warnings,
-      anchorFound: true,
-      anchoredAt: anchorRecord.anchored_at,
+      anchorFound: anchorRecord !== null,
+      anchoredAt: anchorRecord?.anchored_at ?? null,
       acceptor: null,
       acceptorType: null,
       termsHash: null,
@@ -357,7 +394,7 @@ export async function verify(
   // ── Step 4: Acceptance proof (Level 1+) ───────────────────────────────
 
   // Verify acceptor_hash if anchor provides one
-  if (anchorRecord.acceptor_hash) {
+  if (anchorRecord?.acceptor_hash) {
     const computedAcceptorHash = computeAcceptorHash(record.acceptor.identifier);
     const declaredAcceptorHash = anchorRecord.acceptor_hash.replace(/^sha256:/, '');
     if (computedAcceptorHash !== declaredAcceptorHash) {
@@ -370,13 +407,13 @@ export async function verify(
 
   // Verify timestamp consistency
   const acceptedAt = new Date(record.acceptor.accepted_at);
-  const anchoredAt = new Date(anchorRecord.anchored_at);
-  if (acceptedAt > anchoredAt) {
+  const anchoredAt = anchorRecord ? new Date(anchorRecord.anchored_at) : null;
+  if (anchoredAt && acceptedAt > anchoredAt) {
     const diffSec = (acceptedAt.getTime() - anchoredAt.getTime()) / 1000;
     if (diffSec > toleranceSec) {
       errors.push(
         `Timestamp inconsistency: accepted_at (${record.acceptor.accepted_at}) ` +
-        `is after anchored_at (${anchorRecord.anchored_at}) by ${diffSec}s. ` +
+        `is after anchored_at (${anchoredAt.toISOString()}) by ${diffSec}s. ` +
         'Acceptance cannot occur after anchoring.'
       );
     }
@@ -397,8 +434,8 @@ export async function verify(
       agreementHash,
       errors,
       warnings,
-      anchorFound: true,
-      anchoredAt: anchorRecord.anchored_at,
+      anchorFound: anchorRecord !== null,
+      anchoredAt: anchorRecord?.anchored_at ?? null,
       acceptor: record.acceptor?.identifier?.value ?? null,
       acceptorType: (record.acceptor?.acceptor_type as AcceptorType) ?? null,
       termsHash: record.terms_ref?.terms_hash ?? null,
@@ -495,8 +532,8 @@ export async function verify(
     agreementHash,
     errors,
     warnings,
-    anchorFound: true,
-    anchoredAt: anchorRecord.anchored_at,
+    anchorFound: anchorRecord !== null,
+    anchoredAt: anchorRecord?.anchored_at ?? null,
     acceptor: record.acceptor?.identifier?.value ?? null,
     acceptorType: (record.acceptor?.acceptor_type as AcceptorType) ?? null,
     termsHash: record.terms_ref?.terms_hash ?? null,

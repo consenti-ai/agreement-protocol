@@ -29,7 +29,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/consenti-ai/agreement-protocol.git"
+    "url": "git+https://github.com/consenti-ai/agreement-protocol.git"
   },
   "homepage": "https://consenti.ai",
   "engines": {
@@ -39,5 +39,13 @@
     "@types/node": "^26.1.1",
     "tsx": "^4.0.0",
     "typescript": "^5.4.0"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   }
 }

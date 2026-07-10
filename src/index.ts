@@ -6,7 +6,7 @@ export {
   sha256,
   VerificationLevel,
   AcceptorType,
-} from './verifier';
+} from './verifier.js';
 
 export type {
   AcceptanceRecord,
@@ -21,4 +21,4 @@ export type {
   Anchoring,
   Signature,
   Canonicalization,
-} from './verifier';
+} from './verifier.js';
