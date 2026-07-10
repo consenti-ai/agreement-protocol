@@ -4,12 +4,15 @@
   "description": "Reference verifier for the Consenti Agreement Protocol. Independently verify terms acceptance records without Consenti infrastructure.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "npx tsx --test test/*.test.ts",
     "lint": "eslint src/",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "consenti",
@@ -33,7 +36,8 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "tsx": "^4.0.0"
+    "@types/node": "^26.1.1",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
   }
 }
