@@ -21,7 +21,7 @@ Thank you for your interest in contributing. This protocol aims to become open i
 
 ### Bug Reports & Feature Requests
 
-Open a GitHub Issue. For security vulnerabilities, email security@consenti.ai instead.
+Open a GitHub Issue. For security vulnerabilities, email info@blocksee.co instead.
 
 ### Code Contributions
 
