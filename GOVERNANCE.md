@@ -54,5 +54,5 @@ Breaking changes produce a new protocol version string (e.g., `consenti/v0.2`). 
 ## Contact
 
 - Protocol questions: Open a GitHub Issue
-- Security: security@consenti.ai
+- Security: info@blocksee.co
 - Commercial (Consenti hosted product): eric@blocksee.co
