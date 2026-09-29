@@ -21,7 +21,7 @@
  * @license MIT
  */
 
-import { createHash } from 'crypto';
+import { createHash, webcrypto } from 'crypto';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,7 +76,7 @@ export interface Anchoring {
 export interface Signature {
   signer: 'publisher' | 'acceptor';
   algorithm: string;
-  public_key_ref: string;
+  public_key_ref?: string;
   signature: string;
   signed_at: string;
 }
@@ -407,8 +407,14 @@ export async function verify(
 
   // Verify timestamp consistency
   const acceptedAt = new Date(record.acceptor.accepted_at);
+  if (isNaN(acceptedAt.getTime())) {
+    errors.push(`Invalid acceptor.accepted_at timestamp: ${record.acceptor.accepted_at}`);
+  }
+
   const anchoredAt = anchorRecord ? new Date(anchorRecord.anchored_at) : null;
-  if (anchoredAt && acceptedAt > anchoredAt) {
+  if (anchoredAt && isNaN(anchoredAt.getTime())) {
+    errors.push(`Invalid anchor anchored_at timestamp: ${anchorRecord?.anchored_at}`);
+  } else if (anchoredAt && !isNaN(acceptedAt.getTime()) && acceptedAt > anchoredAt) {
     const diffSec = (acceptedAt.getTime() - anchoredAt.getTime()) / 1000;
     if (diffSec > toleranceSec) {
       errors.push(
@@ -451,12 +457,17 @@ export async function verify(
   // Check expiration
   let expired = false;
   if (record.expires_at) {
-    expired = new Date(record.expires_at) < new Date();
-    if (expired) {
-      warnings.push(
-        `Acceptance expired at ${record.expires_at}. ` +
-        'Record is valid but no longer in force.'
-      );
+    const expiresAt = new Date(record.expires_at);
+    if (isNaN(expiresAt.getTime())) {
+      errors.push(`Invalid expires_at timestamp: ${record.expires_at}`);
+    } else {
+      expired = expiresAt < new Date();
+      if (expired) {
+        warnings.push(
+          `Acceptance expired at ${record.expires_at}. ` +
+          'Record is valid but no longer in force.'
+        );
+      }
     }
   }
 
@@ -467,6 +478,12 @@ export async function verify(
       signaturesVerified = true;
       for (const sig of record.signatures) {
         try {
+          if (!sig.public_key_ref) {
+            errors.push(`Signature by ${sig.signer} is missing public_key_ref — cannot resolve key.`);
+            signaturesVerified = false;
+            continue;
+          }
+
           const key = await options.keyResolver(sig.public_key_ref);
           if (!key) {
             errors.push(
@@ -488,14 +505,21 @@ export async function verify(
 
           const algo = algorithmMap[sig.algorithm];
           if (!algo) {
-            warnings.push(
-              `Signature algorithm ${sig.algorithm} not supported by reference verifier. ` +
-              'Use a specialized verifier for this algorithm.'
+            // Fail closed: an algorithm this verifier cannot check must never be
+            // reported as verified. The protocol schema permits ES256K, EdDSA, and
+            // secp256k1-personal, none of which are implemented here — treating
+            // those as a soft warning let a forged/garbage signature pass with
+            // valid:true, signaturesVerified:true.
+            errors.push(
+              `Signature algorithm ${sig.algorithm} is not supported by this reference ` +
+              'verifier and cannot be verified. Treating as UNVERIFIED. Use a specialized ' +
+              'verifier for this algorithm.'
             );
+            signaturesVerified = false;
             continue;
           }
 
-          const valid = await crypto.subtle.verify(
+          const valid = await webcrypto.subtle.verify(
             algo,
             key,
             signatureBytes,
