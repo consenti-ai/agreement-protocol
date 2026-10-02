@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://consenti.ai/schemas/revocation-list-v0.2.json",
+  "title": "Consenti Delegation Revocation List v0.2",
+  "description": "Published at https://{principal-domain}/.well-known/delegations/revoked.json. MUST be signed by the principal. Verifiers treat an unsigned, unverifiable, or stale list as unknown status.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "updated_at",
+    "revoked",
+    "signature"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "consenti/authorization/v0.2"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revoked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "delegation_id",
+          "revoked_at",
+          "effective"
+        ],
+        "properties": {
+          "delegation_id": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "effective": {
+            "enum": [
+              "prospective",
+              "retroactive"
+            ]
+          }
+        }
+      }
+    },
+    "anchor_ref": {
+      "type": "string"
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "public_key_ref",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "enum": [
+            "ES256"
+          ],
+          "description": "v0.2 reference verifier supports ES256 only; other algorithms fail closed."
+        },
+        "public_key_ref": {
+          "type": "string",
+          "description": "MUST be a key the principal controls. For did principals, a fragment of the principal DID."
+        },
+        "value": {
+          "type": "string",
+          "description": "base64url ECDSA signature, raw r||s (preferred) or DER."
+        }
+      }
+    }
+  }
+}
