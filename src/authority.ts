@@ -4,9 +4,12 @@
  * Implements, from specs/delegation-authorization-spec-v0.2.md:
  *   §6   authority object structure and status semantics
  *   §4   delegation credential verification, self-contained mode
- *   §9   revocation, evaluated as of commitment time
+ *   §9   revocation, evaluated over the commitment window
  *   §8.4 the binding check: the agreement's agent signature verifies against
  *        the key the principal named in the credential
+ *   §16 A4 commitment time as a bounded window: the agent's asserted time is
+ *        never trusted alone; the delegation must hold through a trusted time
+ *        bound to agreement_hash, or through verification time without one
  *
  * Not yet implemented here (Level 1A steps 5-7, tracked separately):
  *   scope evaluation, Authorization Event verification, and recomputation of
@@ -23,7 +26,7 @@
 
 import { webcrypto } from 'crypto';
 import { canonicalize, sha256, computeAgreementHash } from './verifier.js';
-import type { AcceptanceRecord, Identifier } from './verifier.js';
+import type { AcceptanceRecord, Identifier, AnchorProvider, AnchorRecord } from './verifier.js';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -116,17 +119,59 @@ export interface RevocationResult {
   listUpdatedAt: string | null;
 }
 
+/**
+ * Where a trusted commitment time came from. Each source is bound to the
+ * agreement hash by something other than the agent's own say-so (§16 A4).
+ *   anchor          — block time of the anchor carrying agreement_hash
+ *   rfc3161         — genTime of an RFC 3161 token over agreement_hash
+ *   x402_settlement — block time of an x402 settlement whose payment nonce
+ *                     commits to agreement_hash (§17.5)
+ */
+export type TrustedTimeSource = 'anchor' | 'rfc3161' | 'x402_settlement';
+
+/**
+ * Evidence of when a commitment happened (§16 A4).
+ *
+ * The asserted time is written by the agent whose authority is in question,
+ * so it is never trusted on its own. The verifier evaluates the delegation over
+ * the window [asserted, end], where end is the trusted time if there is one and
+ * the verification time otherwise. The delegation must hold for the whole
+ * window; if a boundary (revocation or expiry) falls inside it, the order of
+ * events cannot be established and the result is indeterminate.
+ */
+export interface CommitmentEvidence {
+  /** Time the record asserts, normally acceptor.accepted_at. Untrusted. */
+  asserted: string;
+  /** A time bound to agreement_hash by a third party. Upper bound of the window. */
+  trusted?: { time: string; source: TrustedTimeSource } | null;
+  /** When verification runs. Upper bound when there is no trusted time. Default: now. */
+  verifiedAt?: string;
+}
+
 export interface CredentialVerifyOptions {
-  /** The moment the agent committed. Delegations are evaluated as of this time, not now. */
-  commitmentTime: string;
+  /** When the commitment happened. See CommitmentEvidence and §16 A4. */
+  commitment: CommitmentEvidence;
   keyResolver: KeyResolver;
   fetchRevocationList: RevocationFetcher;
   keyOwnership?: KeyOwnershipCheck;
   /**
-   * A revocation within this many seconds of the commitment is ambiguous and
-   * reported as such (§9, the revocation race). Default 1.
+   * A revocation within this many seconds of either end of the commitment
+   * window is ambiguous and reported as such (§9, the revocation race). Default 1.
    */
   ambiguityWindowSec?: number;
+  /**
+   * A revocation list whose updated_at is within this many seconds before the
+   * end of the window is treated as current through the end (§16 A7). Default 300.
+   */
+  maxListAgeSec?: number;
+}
+
+/** The window a delegation was evaluated over, in ISO form. */
+export interface CommitmentWindow {
+  start: string;
+  end: string;
+  /** Which bound closed the window: a trusted source, or the verification time. */
+  endSource: TrustedTimeSource | 'verification_time';
 }
 
 export interface CredentialVerifyResult {
@@ -138,6 +183,15 @@ export interface CredentialVerifyResult {
   signatureVerified: boolean;
   withinValidity: boolean | null;
   revocation: RevocationResult;
+  /** The window the delegation was evaluated over; null if it could not be formed. */
+  window: CommitmentWindow | null;
+  /**
+   * True when the only reason the result is not valid is that a boundary
+   * (revocation or expiry) falls inside the commitment window, so the order of
+   * events cannot be established. Reported as "unknown", not as proof of
+   * invalidity. A trusted time usually narrows the window enough to resolve it.
+   */
+  indeterminate: boolean;
   /** Always null in the self-contained verifier; chain state is not checked here. */
   chainBindingVerified: null;
 }
@@ -385,19 +439,110 @@ function parseTime(value: string | undefined, label: string, errors: string[]): 
   return t;
 }
 
+interface ResolvedWindow {
+  startMs: number;
+  endMs: number;
+  window: CommitmentWindow;
+}
+
+/**
+ * Forms the commitment window [asserted, end] (§16 A4). Returns null, with an
+ * error, when the evidence is malformed or self-contradictory: an asserted time
+ * after the trusted time, or either time in the verifier's future.
+ */
+export function resolveCommitmentWindow(
+  evidence: CommitmentEvidence | undefined,
+  errors: string[],
+  skewSec = 1
+): ResolvedWindow | null {
+  if (!evidence) {
+    errors.push('commitment evidence is missing.');
+    return null;
+  }
+  const skewMs = skewSec * 1000;
+  const startMs = parseTime(evidence.asserted, 'commitment.asserted', errors);
+  const verifiedMs =
+    evidence.verifiedAt !== undefined
+      ? parseTime(evidence.verifiedAt, 'commitment.verifiedAt', errors)
+      : Date.now();
+  const trustedMs = evidence.trusted
+    ? parseTime(evidence.trusted.time, `commitment.trusted.time (${evidence.trusted.source})`, errors)
+    : null;
+  if (startMs === null || verifiedMs === null || (evidence.trusted && trustedMs === null)) return null;
+
+  if (trustedMs !== null && trustedMs > verifiedMs + skewMs) {
+    errors.push(`Trusted time ${evidence.trusted!.time} is after the verification time.`);
+    return null;
+  }
+  const endMs = trustedMs ?? verifiedMs;
+  if (startMs > endMs + skewMs) {
+    errors.push(
+      trustedMs !== null
+        ? `Record asserts ${evidence.asserted}, after its trusted ${evidence.trusted!.source} time ` +
+            `${evidence.trusted!.time}. A genuine record cannot postdate its own anchor.`
+        : `Record asserts ${evidence.asserted}, which is after the verification time.`
+    );
+    return null;
+  }
+  return {
+    startMs,
+    endMs: Math.max(startMs, endMs),
+    window: {
+      start: new Date(startMs).toISOString(),
+      end: new Date(Math.max(startMs, endMs)).toISOString(),
+      endSource: evidence.trusted ? evidence.trusted.source : 'verification_time',
+    },
+  };
+}
+
+/**
+ * Builds commitment evidence for a record, taking the trusted time from the
+ * anchor provider rather than from the record or the caller. The record's own
+ * anchoring.anchored_at is self-reported and is never used as trusted time.
+ * With no provider, or no anchor found, the evidence carries no trusted time
+ * and the window runs to the verification time.
+ */
+export async function commitmentFromAnchor(
+  record: AcceptanceRecord,
+  anchorProvider: AnchorProvider | undefined,
+  verifiedAt?: string
+): Promise<{ evidence: CommitmentEvidence; warnings: string[] }> {
+  const warnings: string[] = [];
+  const evidence: CommitmentEvidence = { asserted: record.acceptor?.accepted_at, trusted: null, verifiedAt };
+  if (!anchorProvider) {
+    warnings.push('No anchor provider: no trusted commitment time; window runs to verification time.');
+    return { evidence, warnings };
+  }
+  const hash = computeAgreementHash(record);
+  let anchor: AnchorRecord | null = null;
+  try {
+    anchor = await anchorProvider.resolve(hash);
+  } catch (err) {
+    warnings.push(`Anchor lookup failed (${(err as Error).message}); no trusted commitment time.`);
+    return { evidence, warnings };
+  }
+  if (!anchor || stripPrefix(anchor.agreement_hash) !== hash) {
+    warnings.push(`No anchor for agreement_hash via ${anchorProvider.name}; no trusted commitment time.`);
+    return { evidence, warnings };
+  }
+  evidence.trusted = { time: anchor.anchored_at, source: 'anchor' };
+  return { evidence, warnings };
+}
+
 // ─── Revocation (§9) ─────────────────────────────────────────────────────────
 
 /**
- * Determines revocation status of a delegation as of the commitment time.
+ * Determines revocation status of a delegation over the commitment window.
  *
  * - The list must be signed by the principal; otherwise status is unknown.
- * - A list last updated before the commitment cannot speak to it; unknown.
- * - Revocation is prospective by default: revoked after commitment = not revoked.
- * - A revocation inside the ambiguity window is reported ambiguous, not resolved.
+ * - The list must be current through the end of the window (A3, A7); otherwise unknown.
+ * - Revoked before the window: revoked. After it: not revoked (prospective default).
+ * - Revoked inside the window, or within the ambiguity margin of either end:
+ *   ambiguous. The order of revocation and commitment cannot be established.
  */
 export async function checkRevocation(
   credential: DelegationCredential,
-  commitmentMs: number,
+  win: { startMs: number; endMs: number },
   options: CredentialVerifyOptions,
   errors: string[],
   warnings: string[]
@@ -452,10 +597,12 @@ export async function checkRevocation(
 
   const updatedMs = parseTime(list.updated_at, 'Revocation list updated_at', errors);
   if (updatedMs === null) return unknown(list.updated_at ?? null);
-  if (updatedMs < commitmentMs) {
+  const maxAgeMs = (options.maxListAgeSec ?? 300) * 1000;
+  if (updatedMs + maxAgeMs < win.endMs) {
     errors.push(
-      `Revocation list was last updated (${list.updated_at}) before the commitment; ` +
-        'it cannot establish status at commitment time. Status unknown.'
+      `Revocation list is accurate as of ${list.updated_at}, before the end of the commitment ` +
+        `window (${new Date(win.endMs).toISOString()}); it cannot rule out a revocation inside ` +
+        'the window. Status unknown.'
     );
     return unknown(list.updated_at);
   }
@@ -483,15 +630,20 @@ export async function checkRevocation(
         `from ${earliest!.revoked_at}. This is a key-compromise claim, not an ordinary revocation.`
     );
   }
-  const windowMs = (options.ambiguityWindowSec ?? 1) * 1000;
-  if (Math.abs(earliestMs - commitmentMs) <= windowMs) {
+  const marginMs = (options.ambiguityWindowSec ?? 1) * 1000;
+  if (earliestMs >= win.startMs - marginMs && earliestMs <= win.endMs + marginMs) {
     errors.push(
-      `Revocation at ${earliest!.revoked_at} and commitment are within ${windowMs / 1000}s. ` +
-        'Order cannot be established; reported as ambiguous.'
+      win.endMs - win.startMs <= marginMs
+        ? `Revocation at ${earliest!.revoked_at} and commitment are within ${marginMs / 1000}s. ` +
+            'Order cannot be established; reported as ambiguous.'
+        : `Revocation at ${earliest!.revoked_at} falls inside the commitment window ` +
+            `${new Date(win.startMs).toISOString()} to ${new Date(win.endMs).toISOString()}. ` +
+            'Without a trusted time closer to the commitment, the order cannot be established; ' +
+            'reported as ambiguous.'
     );
     return { status: 'ambiguous', retroactive, revokedAt: earliest!.revoked_at, listUpdatedAt: list.updated_at };
   }
-  if (earliestMs < commitmentMs) {
+  if (earliestMs < win.startMs) {
     errors.push(`Delegation ${credential.delegation_id} was revoked at ${earliest!.revoked_at}, before the commitment.`);
     return { status: 'revoked', retroactive, revokedAt: earliest!.revoked_at, listUpdatedAt: list.updated_at };
   }
@@ -505,9 +657,10 @@ export async function checkRevocation(
 // ─── Delegation credential (§4, self-contained mode) ─────────────────────────
 
 /**
- * Verifies a delegation credential as of the commitment time:
+ * Verifies a delegation credential over the commitment window:
  * structure, principal commitment, key ownership, principal signature,
- * validity window, and revocation. Valid only if every check passes.
+ * validity, and revocation. Valid only if every check passes for the whole
+ * window. See CredentialVerifyResult.indeterminate for the "unknown" outcome.
  */
 export async function verifyDelegationCredential(
   credential: DelegationCredential,
@@ -531,6 +684,8 @@ export async function verifyDelegationCredential(
     signatureVerified: false,
     withinValidity: null,
     revocation: { status: 'unknown', retroactive: false, revokedAt: null, listUpdatedAt: null },
+    window: null,
+    indeterminate: false,
     chainBindingVerified: null,
     ...extra,
   });
@@ -595,31 +750,41 @@ export async function verifyDelegationCredential(
     );
   }
 
-  // Validity window, as of commitment time
+  // Validity, over the whole commitment window (§16 A4). The asserted time is
+  // the agent's own claim, so the credential must be valid from it through the
+  // trusted time (or verification time). An expiry inside the window means the
+  // order cannot be established: withinValidity is null, not false.
   let withinValidity: boolean | null = null;
-  const commitMs = parseTime(options.commitmentTime, 'commitmentTime', errors);
+  let expiryInWindow = false;
+  const resolved = resolveCommitmentWindow(options.commitment, errors, options.ambiguityWindowSec ?? 1);
   const issuedMs = parseTime(credential.issued_at, 'issued_at', errors);
   const expiresMs = parseTime(credential.expires_at, 'expires_at', errors);
-  if (commitMs !== null && issuedMs !== null && expiresMs !== null) {
+  if (resolved && issuedMs !== null && expiresMs !== null) {
+    const { startMs, endMs, window: w } = resolved;
     if (issuedMs >= expiresMs) {
       errors.push('issued_at must precede expires_at.');
       withinValidity = false;
-    } else if (commitMs < issuedMs) {
-      errors.push(`Commitment at ${options.commitmentTime} precedes credential issuance at ${credential.issued_at}.`);
+    } else if (startMs < issuedMs) {
+      errors.push(`Commitment asserted at ${w.start} precedes credential issuance at ${credential.issued_at}.`);
       withinValidity = false;
-    } else if (commitMs > expiresMs) {
-      errors.push(`Commitment at ${options.commitmentTime} is after credential expiry at ${credential.expires_at}.`);
+    } else if (startMs > expiresMs) {
+      errors.push(`Commitment asserted at ${w.start} is after credential expiry at ${credential.expires_at}.`);
       withinValidity = false;
+    } else if (endMs > expiresMs) {
+      expiryInWindow = true;
+      errors.push(
+        `Credential expired at ${credential.expires_at}, inside the commitment window ${w.start} to ` +
+          `${w.end}. Whether the commitment preceded expiry cannot be established.`
+      );
     } else {
       withinValidity = true;
     }
   }
 
   // Revocation. Checked even when earlier steps fail, so the result is complete.
-  const revocation =
-    commitMs !== null
-      ? await checkRevocation(credential, commitMs, options, errors, warnings)
-      : ({ status: 'unknown', retroactive: false, revokedAt: null, listUpdatedAt: null } as RevocationResult);
+  const revocation = resolved
+    ? await checkRevocation(credential, resolved, options, errors, warnings)
+    : ({ status: 'unknown', retroactive: false, revokedAt: null, listUpdatedAt: null } as RevocationResult);
 
   const valid =
     principalCommitmentMatches &&
@@ -627,6 +792,16 @@ export async function verifyDelegationCredential(
     withinValidity === true &&
     revocation.status === 'not_revoked' &&
     errors.length === 0;
+
+  // Indeterminate: every other check passed and the only failures are a
+  // boundary inside the window. Not proof of invalidity; proof is not possible.
+  const indeterminate =
+    !valid &&
+    principalCommitmentMatches &&
+    signatureVerified &&
+    (expiryInWindow || revocation.status === 'ambiguous') &&
+    (withinValidity === true || expiryInWindow) &&
+    (revocation.status === 'not_revoked' || revocation.status === 'ambiguous');
 
   return {
     valid,
@@ -637,6 +812,8 @@ export async function verifyDelegationCredential(
     signatureVerified,
     withinValidity,
     revocation,
+    window: resolved?.window ?? null,
+    indeterminate,
     chainBindingVerified: null,
   };
 }

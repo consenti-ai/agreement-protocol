@@ -13,6 +13,7 @@ import {
   normalizeEs256Signature,
   verifyDelegationCredential,
   verifyAgentBinding,
+  commitmentFromAnchor,
 } from '../src/authority.js';
 import type { DelegationCredential, RevocationList, CredentialVerifyOptions } from '../src/authority.js';
 
@@ -114,8 +115,16 @@ async function revocationList(
   );
 }
 
+/** Evidence for a commitment anchored at the moment it was asserted (zero-width window). */
+const VERIFY = '2027-03-01T00:00:00Z';
+const anchoredAt = (t: string, asserted = t) => ({
+  asserted,
+  trusted: { time: t, source: 'anchor' as const },
+  verifiedAt: VERIFY,
+});
+
 async function opts(list: RevocationList | null, extra: Partial<CredentialVerifyOptions> = {}): Promise<CredentialVerifyOptions> {
-  return { commitmentTime: COMMIT, keyResolver, fetchRevocationList: async () => list, ...extra };
+  return { commitment: anchoredAt(COMMIT), keyResolver, fetchRevocationList: async () => list, ...extra };
 }
 
 async function signedRecord(cred: DelegationCredential, mutate?: (r: AcceptanceRecord) => void, signer?: CryptoKey) {
@@ -246,10 +255,10 @@ test('unsupported algorithm fails closed', async () => {
 test('commitment after expiry or before issuance is outside validity', async () => {
   await setup();
   const cred = await sign(unsignedCredential(), principal.privateKey);
-  const late = await verifyDelegationCredential(cred, await opts(await revocationList([], '2027-02-01T00:00:00Z'), { commitmentTime: '2027-01-15T00:00:00Z' }));
+  const late = await verifyDelegationCredential(cred, await opts(await revocationList([], '2027-02-01T00:00:00Z'), { commitment: anchoredAt('2027-01-15T00:00:00Z') }));
   assert.equal(late.withinValidity, false);
   assert.equal(late.valid, false);
-  const early = await verifyDelegationCredential(cred, await opts(await revocationList(), { commitmentTime: '2026-09-01T00:00:00Z' }));
+  const early = await verifyDelegationCredential(cred, await opts(await revocationList(), { commitment: anchoredAt('2026-09-01T00:00:00Z') }));
   assert.equal(early.withinValidity, false);
 });
 
@@ -450,4 +459,141 @@ test('binding: a valid signature under a non-delegated key reference does not bi
   const r = await verifyAgentBinding(record, cred, keyResolver);
   assert.equal(r.valid, false);
   assert.ok(r.errors.some((e) => e.includes('No acceptor signature under the delegated agent key')));
+});
+
+// ─── A4: commitment time as a bounded window ─────────────────────────────────
+
+const REVOKED_OCT10 = [{ delegation_id: 'dlg_media_001', revoked_at: '2026-10-10T00:00:00Z', effective: 'prospective' as const }];
+
+test('A4 attack: backdating past a revocation does not verify (no trusted time)', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  // Revoked Oct 10. Agent signs on Oct 20 and dates the record Oct 9.
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList(REVOKED_OCT10, '2026-10-20T00:00:00Z'), {
+      commitment: { asserted: '2026-10-09T00:00:00Z', trusted: null, verifiedAt: '2026-10-20T00:01:00Z' },
+    })
+  );
+  assert.equal(r.valid, false);
+  assert.equal(r.revocation.status, 'ambiguous');
+  assert.equal(r.indeterminate, true);
+  assert.equal(r.window?.endSource, 'verification_time');
+});
+
+test('A4 attack: backdating past a revocation does not verify (late anchor)', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList(REVOKED_OCT10, '2026-10-20T00:00:00Z'), {
+      commitment: anchoredAt('2026-10-20T00:00:00Z', '2026-10-09T00:00:00Z'),
+    })
+  );
+  assert.equal(r.valid, false);
+  assert.equal(r.revocation.status, 'ambiguous');
+  assert.equal(r.indeterminate, true);
+});
+
+test('A4: a prompt anchor resolves the same timeline in the commitment\'s favor', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  // Committed Oct 9, anchored five minutes later, revoked Oct 10.
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList(REVOKED_OCT10, '2026-10-20T00:00:00Z'), {
+      commitment: anchoredAt('2026-10-09T00:05:00Z', '2026-10-09T00:00:00Z'),
+    })
+  );
+  assert.equal(r.valid, true, r.errors.join('; '));
+  assert.equal(r.indeterminate, false);
+});
+
+test('A4 attack: backdating past expiry does not verify', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey); // expires 2026-12-31T23:59:59Z
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList([], '2027-01-05T00:00:00Z'), {
+      commitment: anchoredAt('2027-01-05T00:00:00Z', '2026-12-30T00:00:00Z'),
+    })
+  );
+  assert.equal(r.valid, false);
+  assert.equal(r.withinValidity, null);
+  assert.equal(r.indeterminate, true);
+});
+
+test('A4: no trusted time, nothing revoked, fresh list: valid (worst case has nothing to exploit)', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList([], '2026-10-20T00:00:00Z'), {
+      commitment: { asserted: COMMIT, verifiedAt: '2026-10-20T00:03:00Z' },
+    })
+  );
+  assert.equal(r.valid, true, r.errors.join('; '));
+  assert.equal(r.window?.endSource, 'verification_time');
+});
+
+test('A4/A7: list freshness is measured at the end of the window', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  // List is current as of Oct 20, but without a trusted time the window runs to Oct 25.
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList([], '2026-10-20T00:00:00Z'), {
+      commitment: { asserted: COMMIT, verifiedAt: '2026-10-25T00:00:00Z' },
+    })
+  );
+  assert.equal(r.revocation.status, 'unknown');
+  assert.equal(r.valid, false);
+  assert.equal(r.indeterminate, false);
+});
+
+test('A4: a record asserting a time after its own anchor is rejected', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList(), { commitment: anchoredAt('2026-10-15T00:00:00Z', '2026-10-16T00:00:00Z') })
+  );
+  assert.equal(r.valid, false);
+  assert.equal(r.window, null);
+  assert.ok(r.errors.some((e) => e.includes('cannot postdate its own anchor')));
+});
+
+test('A4: a revocation before the whole window is a plain failure, not indeterminate', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList(REVOKED_OCT10, '2026-10-20T00:00:00Z'), {
+      commitment: { asserted: COMMIT, verifiedAt: '2026-10-20T00:01:00Z' },
+    })
+  );
+  assert.equal(r.revocation.status, 'revoked');
+  assert.equal(r.indeterminate, false);
+});
+
+test('A4: trusted time comes from the anchor provider, never the record\'s own anchored_at', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  const record = await signedRecord(cred, (rec) => {
+    rec.anchoring = { method: 'evm', agreement_hash: 'ignored', anchored_at: '2026-10-01T00:00:00Z' };
+  });
+  const hash = computeAgreementHash(record);
+  const provider = {
+    name: 'test-chain',
+    resolve: async (h: string) =>
+      h === hash ? { agreement_hash: 'sha256:' + hash, anchored_at: '2026-10-15T12:04:00Z', transaction_ref: '0x1' } : null,
+  };
+  const withAnchor = await commitmentFromAnchor(record, provider, VERIFY);
+  assert.deepEqual(withAnchor.evidence.trusted, { time: '2026-10-15T12:04:00Z', source: 'anchor' });
+  assert.equal(withAnchor.evidence.asserted, COMMIT);
+
+  const missing = await commitmentFromAnchor(record, { name: 'empty', resolve: async () => null }, VERIFY);
+  assert.equal(missing.evidence.trusted, null);
+  const none = await commitmentFromAnchor(record, undefined, VERIFY);
+  assert.equal(none.evidence.trusted, null);
 });

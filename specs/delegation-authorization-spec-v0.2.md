@@ -332,9 +332,13 @@ this agreement?"
 1. Verify the delegation credential's signature against the principal's
    published key. Where `chain_binding` is present, check the ERC-7710
    delegation hash against chain state.
-2. Check `issued_at` ≤ commitment time ≤ `expires_at`.
-3. Fetch `revocation.check_url`; confirm `delegation_id` is absent from the
-   revocation list as of the commitment time, not as of now (§9).
+2. Form the commitment window (§16 A4): from the time the record asserts to
+   a trusted time bound to `agreement_hash`, or to the verification time if
+   there is none. Check `issued_at` ≤ window start and window end ≤
+   `expires_at`.
+3. Fetch `revocation.check_url`; confirm `delegation_id` was not revoked at
+   any point in the window, using a list current through the window's end
+   (§9, §16 A4 and A7).
 4. Confirm the commitment signature on the agreement verifies against
    `agent.public_key_ref` from the credential. **This is the step that binds
    the signature to the authority.** Without it a verifier has two unrelated
@@ -343,7 +347,7 @@ this agreement?"
    `max_value`, `prohibited_clauses`.
 6. Where an Authorization Event is present: verify its signature, confirm
    `agreement_hash` matches, confirm `delegation_id` matches, confirm it had
-   not expired at commitment time.
+   not expired at any point in the commitment window.
 7. Recompute the authority object hash and confirm it matches
    `authority_commitment` on the anchor.
 
@@ -391,10 +395,12 @@ louder claim — the principal is asserting the agent's key was not under its
 control from `revoked_at`. Verifiers MUST surface retroactive revocation
 prominently rather than silently invalidating.
 
-**The revocation race.** A commitment and a revocation can be concurrent. The
-anchor timestamp on each is the tiebreaker; where both anchor within the
-same block or timestamp granularity, the record is ambiguous and a verifier
-MUST report it as ambiguous rather than resolving it. This is an honest
+**The revocation race.** A commitment and a revocation can be concurrent. A
+trusted time on each is the tiebreaker (§16 A4); the time an agent writes into
+its own record is not. Where a revocation falls inside the commitment window,
+including where both anchor within the same block or timestamp granularity,
+the record is ambiguous and a verifier MUST report it as ambiguous rather
+than resolving it. This is an honest
 limitation of any distributed revocation scheme and should not be papered
 over.
 
@@ -676,14 +682,47 @@ fail closed if it cannot. The same rule applies to the revocation list.
 
 **A3. Revocation lists are signed and must be fresh.** A revocation list MUST be
 signed by the principal under A2. An unsigned list, a list whose signature fails,
-or a list whose `updated_at` precedes the commitment yields status `unknown`. A
-list published before the commitment cannot speak to a revocation in between.
+or a list not current through the end of the commitment window (A4, A7) yields
+status `unknown`. A list published before the window closes cannot speak to a
+revocation inside it.
 
-**A4. Revocation timing.** Where several entries name one delegation, the
-earliest `revoked_at` governs. The ambiguity window (§9) is a verifier parameter,
-default one second. The verifier takes commitment time as an input; callers
-SHOULD pass the anchor timestamp where one exists, since §9 names it the
-tiebreaker, and fall back to `acceptor.accepted_at` otherwise.
+**A4. Commitment time is a bounded window, not an asserted instant.**
+*(Revised after review. The first version let callers fall back to
+`acceptor.accepted_at`, which the agent writes itself. An agent whose
+delegation was revoked could sign afterwards and date the record before the
+revocation, and the same backdating defeats the expiry check.)*
+
+- The time a record asserts (`acceptor.accepted_at`) is untrusted. It is
+  written by the party whose authority is in question.
+- A **trusted time** is one bound to `agreement_hash` by a third party: the
+  block time of the anchor carrying the hash, the `genTime` of an RFC 3161
+  token over the hash, or the block time of an x402 settlement whose payment
+  nonce commits to the hash (§17.5). Verifiers MUST derive it from the anchor,
+  token or transaction themselves. They MUST NOT accept it as a free input
+  from the caller, and MUST NOT use the record's own `anchoring.anchored_at`,
+  which is self-reported.
+- The **commitment window** runs from the asserted time to the trusted time,
+  or to the verification time where there is no trusted time. A record that
+  asserts a time after its own trusted time is malformed and fails.
+- The delegation MUST be issued before the window starts, unexpired at its
+  end, and unrevoked throughout. Then the result is valid: backdating within
+  the window cannot change the outcome, so there is nothing to exploit.
+- If an expiry or a revocation falls inside the window, the order of events
+  cannot be established. The verifier MUST report the result as
+  indeterminate (`unknown`), not as valid and not as proof of invalidity.
+- Where several revocation entries name one delegation, the earliest
+  `revoked_at` governs. A revocation within the ambiguity margin of either end
+  of the window (verifier parameter, default one second) is ambiguous.
+
+The consequence should be stated plainly to anyone relying on these records:
+**without a trusted time, a record can verify, but it cannot win a dispute
+over whether it came before a revocation.** A prompt anchor narrows the window
+to minutes and usually resolves it. Disputes about ordering need anchoring.
+
+Residual: an agent can also *post*-date a record. That only makes expiry and
+revocation checks stricter, but it can hide a commitment signed before the
+credential was issued. Issuance-time disputes need a trusted lower bound,
+which v0.2 does not define.
 
 **A5. Scope profiles.** Credentials MAY carry an optional `profile` naming a
 namespaced action vocabulary (for example `consenti/media-licensing/v0.1`). The
@@ -692,3 +731,13 @@ core spec defines no action names; profiles do.
 **A6. ES256 encoding.** Signatures MAY be raw r||s (preferred) or DER.
 Verifiers MUST normalize before verification. The v0.2 reference verifier
 supports ES256 only and fails closed on any other algorithm.
+
+**A7. A revocation list's `updated_at` means "accurate as of".** It is not
+the time of the last change. Publishers MUST set it to the time the list was
+generated, and SHOULD serve a list generated within the last five minutes,
+because under A4 a list must be current through the end of the commitment
+window to rule out a revocation inside it. Verifiers treat a list as current
+through the window's end when `updated_at` is within a freshness tolerance of
+it (verifier parameter, default 300 seconds), and report `unknown` otherwise.
+A list that only changes `updated_at` when an entry is added will make every
+unanchored verification come back `unknown`.

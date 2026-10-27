@@ -40,6 +40,8 @@ export {
   checkRevocation,
   verifyDelegationCredential,
   verifyAgentBinding,
+  resolveCommitmentWindow,
+  commitmentFromAnchor,
 } from './authority.js';
 
 export type {
@@ -58,4 +60,7 @@ export type {
   CredentialVerifyOptions,
   CredentialVerifyResult,
   BindingVerifyResult,
+  CommitmentEvidence,
+  CommitmentWindow,
+  TrustedTimeSource,
 } from './authority.js';
