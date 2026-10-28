@@ -1,0 +1,29 @@
+{
+  "type": "consenti/delegation/v0.2",
+  "profile": "consenti/media-licensing/v0.1",
+  "delegation_id": "dlg_media_001",
+  "principal": {
+    "identifier": { "type": "did", "value": "did:web:productions.example" },
+    "commitment": "sha256:<SHA-256 of canonical principal.identifier>"
+  },
+  "agent": {
+    "identifier": { "type": "agent_id", "value": "agent://productions/research-1" },
+    "public_key_ref": "did:web:productions.example#agent-key-3"
+  },
+  "scope": {
+    "actions": ["license.editorial", "license.research"],
+    "counterparties": ["did:web:starchive.io"],
+    "max_value": { "amount": "750.00", "currency": "USD" },
+    "aggregate_cap": { "amount": "10000.00", "currency": "USD", "period": "P30D" },
+    "prohibited_clauses": ["exclusivity", "perpetual_term", "sublicensing", "uncapped_licensee_indemnity"],
+    "requires_authorization_above": { "amount": "250.00", "currency": "USD" }
+  },
+  "issued_at": "2026-10-01T00:00:00Z",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "revocation": { "check_url": "https://productions.example/.well-known/delegations/revoked.json" },
+  "signature": {
+    "algorithm": "ES256",
+    "public_key_ref": "did:web:productions.example#key-1",
+    "value": "<base64url ES256 over RFC 8785 canonical form, signature removed>"
+  }
+}

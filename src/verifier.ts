@@ -103,6 +103,12 @@ export interface AcceptanceRecord {
   privacy?: Record<string, unknown> | null;
   canonicalization: Canonicalization;
   extensions?: Record<string, unknown> | null;
+  /**
+   * v0.2 (consenti/authorization/v0.2): authority object. MUST be listed in
+   * canonicalization.excluded_fields when present, because the Authorization
+   * Event it references binds to agreement_hash. See authority.ts.
+   */
+  authority?: Record<string, unknown> | null;
 }
 
 export interface AnchorRecord {
@@ -158,6 +164,9 @@ export interface VerificationResult {
   signaturesVerified: boolean | null;
   expired: boolean | null;
 }
+
+/** Agreement protocol versions this verifier understands. */
+export const KNOWN_PROTOCOL_VERSIONS = ['consenti/v0.1', 'consenti/v0.2'];
 
 // ─── Canonicalization (RFC 8785 — JSON Canonicalization Scheme) ──────────────
 
@@ -218,6 +227,7 @@ export function computeAgreementHash(record: AcceptanceRecord): string {
   const excluded = record.canonicalization?.excluded_fields ?? [
     'anchoring',
     'signatures',
+    'authority',
     'privacy.anchor_commitment',
     'privacy.merkle_tree.root',
   ];
@@ -300,10 +310,10 @@ export async function verify(
 
   // ── Step 2: Protocol version check ────────────────────────────────────
 
-  if (record.protocol_version !== 'consenti/v0.1') {
+  if (!KNOWN_PROTOCOL_VERSIONS.includes(record.protocol_version)) {
     warnings.push(
       `Unknown protocol version: ${record.protocol_version}. ` +
-      'This verifier targets consenti/v0.1.'
+      `This verifier targets ${KNOWN_PROTOCOL_VERSIONS.join(', ')}.`
     );
   }
 
