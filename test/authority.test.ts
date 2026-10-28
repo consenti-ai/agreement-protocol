@@ -14,6 +14,7 @@ import {
   verifyDelegationCredential,
   verifyAgentBinding,
   commitmentFromAnchor,
+  verifyDelegationForRecord,
 } from '../src/authority.js';
 import type { DelegationCredential, RevocationList, CredentialVerifyOptions } from '../src/authority.js';
 
@@ -596,4 +597,40 @@ test('A4: trusted time comes from the anchor provider, never the record\'s own a
   assert.equal(missing.evidence.trusted, null);
   const none = await commitmentFromAnchor(record, undefined, VERIFY);
   assert.equal(none.evidence.trusted, null);
+});
+
+test('A4: the record-level entry point derives the window from the anchor, not the caller', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  // Record claims Oct 15; revoked Oct 10; anchor shows Oct 20. Backdated.
+  const record = await signedRecord(cred, (rec) => {
+    rec.acceptor.accepted_at = '2026-10-09T00:00:00Z';
+  });
+  const hash = computeAgreementHash(record);
+  const provider = {
+    name: 'test-chain',
+    resolve: async (h: string) =>
+      h === hash ? { agreement_hash: 'sha256:' + hash, anchored_at: '2026-10-20T00:00:00Z', transaction_ref: '0x2' } : null,
+  };
+  const r = await verifyDelegationForRecord(record, cred, {
+    keyResolver,
+    fetchRevocationList: async () => revocationList(REVOKED_OCT10, '2026-10-20T00:00:00Z'),
+    anchorProvider: provider,
+    now: () => new Date('2026-10-20T00:02:00Z'),
+  });
+  assert.equal(r.valid, false);
+  assert.equal(r.indeterminate, true);
+  assert.equal(r.window?.endSource, 'anchor');
+  assert.equal(r.window?.end, '2026-10-20T00:00:00.000Z');
+});
+
+test('A7: a revocation list dated after verification time is not trusted', async () => {
+  await setup();
+  const cred = await sign(unsignedCredential(), principal.privateKey);
+  const r = await verifyDelegationCredential(
+    cred,
+    await opts(await revocationList([], '2027-06-01T00:00:00Z')) // VERIFY is 2027-03-01
+  );
+  assert.equal(r.revocation.status, 'unknown');
+  assert.equal(r.valid, false);
 });

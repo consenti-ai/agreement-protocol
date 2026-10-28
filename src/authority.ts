@@ -5,7 +5,7 @@
  *   §6   authority object structure and status semantics
  *   §4   delegation credential verification, self-contained mode
  *   §9   revocation, evaluated over the commitment window
- *   §8.4 the binding check: the agreement's agent signature verifies against
+ *   §8 step 4, the binding check: the agreement's agent signature verifies against
  *        the key the principal named in the credential
  *   §16 A4 commitment time as a bounded window: the agent's asserted time is
  *        never trusted alone; the delegation must hold through a trusted time
@@ -67,7 +67,12 @@ export interface DelegationCredential {
   profile?: string;
   delegation_id: string;
   principal: { identifier: Identifier; commitment: string };
-  agent: { identifier: Identifier; public_key_ref: string };
+  agent: {
+    identifier: Identifier;
+    public_key_ref: string;
+    /** CAIP-10 accounts the agent pays from (§17.4). Not yet checked by this verifier. */
+    payment_accounts?: string[];
+  };
   scope: DelegationScope;
   chain_binding?: { standard: string; delegation_hash: string; chain: string };
   issued_at: string;
@@ -126,6 +131,10 @@ export interface RevocationResult {
  *   rfc3161         — genTime of an RFC 3161 token over agreement_hash
  *   x402_settlement — block time of an x402 settlement whose payment nonce
  *                     commits to agreement_hash (§17.5)
+ *
+ * This verifier can only derive 'anchor' itself (commitmentFromAnchor). The
+ * other two are named so the spec and the types agree; nothing here verifies
+ * an RFC 3161 token or an x402 settlement yet.
  */
 export type TrustedTimeSource = 'anchor' | 'rfc3161' | 'x402_settlement';
 
@@ -138,6 +147,12 @@ export type TrustedTimeSource = 'anchor' | 'rfc3161' | 'x402_settlement';
  * the verification time otherwise. The delegation must hold for the whole
  * window; if a boundary (revocation or expiry) falls inside it, the order of
  * events cannot be established and the result is indeterminate.
+ *
+ * Low-level input. Whoever builds this object is trusting their own `trusted`
+ * and `verifiedAt` values; a caller who sets verifiedAt to the asserted time
+ * collapses the window and defeats A4. A conformant verifier uses
+ * verifyDelegationForRecord, which derives the trusted time from the anchor
+ * and reads the clock itself.
  */
 export interface CommitmentEvidence {
   /** Time the record asserts, normally acceptor.accepted_at. Untrusted. */
@@ -442,6 +457,7 @@ function parseTime(value: string | undefined, label: string, errors: string[]): 
 interface ResolvedWindow {
   startMs: number;
   endMs: number;
+  verifiedMs: number;
   window: CommitmentWindow;
 }
 
@@ -487,6 +503,7 @@ export function resolveCommitmentWindow(
   return {
     startMs,
     endMs: Math.max(startMs, endMs),
+    verifiedMs,
     window: {
       start: new Date(startMs).toISOString(),
       end: new Date(Math.max(startMs, endMs)).toISOString(),
@@ -542,7 +559,7 @@ export async function commitmentFromAnchor(
  */
 export async function checkRevocation(
   credential: DelegationCredential,
-  win: { startMs: number; endMs: number },
+  win: { startMs: number; endMs: number; verifiedMs?: number },
   options: CredentialVerifyOptions,
   errors: string[],
   warnings: string[]
@@ -597,6 +614,11 @@ export async function checkRevocation(
 
   const updatedMs = parseTime(list.updated_at, 'Revocation list updated_at', errors);
   if (updatedMs === null) return unknown(list.updated_at ?? null);
+  const skewMs = (options.ambiguityWindowSec ?? 1) * 1000;
+  if (updatedMs > (win.verifiedMs ?? Date.now()) + skewMs) {
+    errors.push(`Revocation list claims to be accurate as of ${list.updated_at}, after verification time. Status unknown.`);
+    return unknown(list.updated_at);
+  }
   const maxAgeMs = (options.maxListAgeSec ?? 300) * 1000;
   if (updatedMs + maxAgeMs < win.endMs) {
     errors.push(
@@ -816,6 +838,29 @@ export async function verifyDelegationCredential(
     indeterminate,
     chainBindingVerified: null,
   };
+}
+
+/**
+ * The conformant entry point for Level 1A steps 1-3 (§16 A4). Derives the
+ * commitment window from the record and the anchor, never from the caller:
+ * asserted time from acceptor.accepted_at, trusted time from the anchor
+ * provider, end-of-window from the clock. `now` exists for tests; production
+ * callers leave it unset.
+ */
+export async function verifyDelegationForRecord(
+  record: AcceptanceRecord,
+  credential: DelegationCredential,
+  options: Omit<CredentialVerifyOptions, 'commitment'> & {
+    anchorProvider?: AnchorProvider;
+    now?: () => Date;
+  }
+): Promise<CredentialVerifyResult> {
+  const { anchorProvider, now, ...rest } = options;
+  const verifiedAt = (now ? now() : new Date()).toISOString();
+  const { evidence, warnings } = await commitmentFromAnchor(record, anchorProvider, verifiedAt);
+  const result = await verifyDelegationCredential(credential, { ...rest, commitment: evidence });
+  result.warnings.unshift(...warnings);
+  return result;
 }
 
 // ─── Binding (§8 step 4) ─────────────────────────────────────────────────────

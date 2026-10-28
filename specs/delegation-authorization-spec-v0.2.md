@@ -1,6 +1,6 @@
 # Consenti Delegation & Principal Authorization Extension v0.2
 
-**Status:** Draft
+**Status:** Draft. §16 records amendments forced by the reference implementation and review; §17 is a proposed x402 binding, not implemented.
 **Protocol ID:** `consenti/authorization/v0.2`
 **Extends:** [Discovery Spec v0.1](./well-known-agreements-spec.md) · [Privacy Architecture v0.1](./agreement-privacy-architecture.md) · Agreement Schema v0.1
 **Maintainer:** Consenti (FHBK Technologies, Inc.)
@@ -88,7 +88,7 @@ commitment above threshold carries both.
     "commitment": "sha256:4b1e…"
   },
   "agent": {
-    "identifier": { "type": "erc8004", "value": "eip155:1:0xAgent…" },
+    "identifier": { "type": "erc8004", "value": "eip155:1:0xIdentityRegistry…#42" },
     "public_key_ref": "did:web:acme.example#agent-key-3"
   },
   "scope": {
@@ -125,8 +125,9 @@ commitment above threshold carries both.
 | `delegation_id` | yes | Stable identifier. Opaque; carries no semantics. |
 | `principal.identifier` | yes | DID, URL, or other resolvable identifier of the granting party. |
 | `principal.commitment` | yes | `SHA-256(canonical(principal.identifier))`. The value published in any public context. See §7. |
-| `agent.identifier` | yes | The agent's identifier. ERC-8004 where one exists. |
+| `agent.identifier` | yes | The agent's identifier. ERC-8004 where one exists: the identity registry (CAIP-10) plus the agent's token ID, shown here as `#42`. Follow ERC-8004's own string format where it defines one. |
 | `agent.public_key_ref` | yes | The key the agent signs commitments with. Verifiers resolve this and check the commitment signature against it. |
+| `agent.payment_accounts` | no | CAIP-10 accounts the agent pays from. Required to bind an x402 payment to this credential (§17.4). |
 | `scope` | yes | Bounds on the grant. MUST be present; an unbounded delegation is expressed as explicit wildcards, never by omission. |
 | `scope.requires_authorization_above` | no | Threshold above which a per-commitment Authorization Event (§5) is also required. Absent means no threshold — delegation alone suffices at any value within `max_value`. |
 | `scope.prohibited_clauses` | no | Clause types the agent may not accept regardless of value. Evaluated against the agreement's clause paths. |
@@ -204,7 +205,10 @@ whenever the principal's policy demands a human in the loop.
   comes from the delegation.
 - It SHOULD carry a short `expires_at`. An approval that sat unused for a week
   is weak evidence that the principal approved *this* transaction. Fifteen
-  minutes is the reference default.
+  minutes is the reference default. Under §16 A4 this has a consequence: an
+  `authorized` record with no trusted time becomes indeterminate once its
+  event expires, because the commitment can no longer be shown to fall
+  before expiry. Authorized commitments need prompt anchoring.
 - `decision` MUST be one of `approved`, `denied`, `expired`. Denials are
   recorded and anchored like approvals. A record that only ever shows
   approvals proves nothing about the ones that were refused.
@@ -346,10 +350,15 @@ this agreement?"
 5. Evaluate the agreement against `scope`: action type, counterparty,
    `max_value`, `prohibited_clauses`.
 6. Where an Authorization Event is present: verify its signature, confirm
-   `agreement_hash` matches, confirm `delegation_id` matches, confirm it had
-   not expired at any point in the commitment window.
+   `agreement_hash` matches, confirm `delegation_id` matches, confirm it was
+   issued (`authorized_at`) no later than the window's start and had not
+   expired by its end.
 7. Recompute the authority object hash and confirm it matches
    `authority_commitment` on the anchor.
+
+Steps 2, 3 and 6 compare a boundary with the commitment window. Where the
+boundary falls inside the window, the step's result is indeterminate, not
+failed, and Level 1A reports `unknown` (§16 A4).
 
 **Disclosed:** That a named principal authorized this commitment, under what
 scope. Nothing about the terms.
@@ -488,7 +497,8 @@ Link: <https://example.com/.well-known/agreements.json>; rel="agreement-director
 Resolution order in a combined flow: **409 → 403 → 402.** Agree to terms,
 prove you were allowed to, then pay. An agent that pays first has committed
 funds under terms it had no authority to accept, which is the compound
-failure this stack exists to prevent.
+failure this stack exists to prevent. Inside x402 the same order is enforced
+as checks within one 402 round trip rather than as three responses (§17).
 
 ---
 
@@ -503,6 +513,7 @@ failure this stack exists to prevent.
 | **W3C Verifiable Credentials 2.0** | Credential data model, issuance, revocation | The Delegation Credential SHOULD be expressible as a VC. A VC profile is v0.3 work (§14). |
 | **UCAN / ZCAP-LD** | Object-capability delegation, attenuation, chaining | Prior art for delegation chains. Sub-delegation (§14) should follow UCAN attenuation semantics rather than invent new ones. |
 | **OAuth 2.0 / GNAP** | Human-to-application authorization | Different problem. OAuth authorizes *access*; this authorizes *contractual commitment*. Do not model this as OAuth scopes — an access token is not evidence of assent and does not survive as a record. |
+| **x402** (Linux Foundation; v2) | HTTP-native payment in one 402 round trip | Payment rail. §17 proposes binding v0.2 to it through `extensions`, a principal-signed payer account, and an ERC-3009 nonce that commits to the agreement. |
 | **RFC 8785 (JCS)** | JSON canonicalization | Required for every hash and signature here, as in v0.1. |
 
 The honest positioning: the identity and payment layers are well served and
@@ -616,6 +627,12 @@ the other side of the transaction.
   matrix — approval tiers, dual signatures, board thresholds — onto
   delegations. Dual-control ("two principals must both authorize") is not
   expressible in v0.2 and enterprise buyers will ask for it.
+- **x402 bindings beyond ERC-3009.** Nonce rules for Permit2 and non-EVM
+  networks (§17.5), so a payment on those rails can be bound to an agreement.
+- **ES256K / EIP-712 agent signatures.** Letting the paying wallet sign the
+  agreement directly instead of being listed in `payment_accounts` (§17.4).
+- **Trusted lower bound on commitment time.** A4 bounds the window above; a
+  post-dated record can still hide a pre-issuance commitment.
 - **Cross-jurisdiction scope.** Whether scope should carry governing-law or
   jurisdiction constraints, or whether that belongs in the agreement.
 
@@ -640,6 +657,9 @@ Ordered by dependency, not by priority.
 6. **Directory `requires_authority`** (§10.1) and **403** (§10.2) — the
    demand side. Only useful once counterparties can verify.
 7. **ERC-7710 chain binding** — after self-contained mode is proven.
+8. **x402 profile (§17)** — `payment_accounts` check, nonce derivation and
+   recomputation, and an evidence source that returns the settlement block
+   time as a trusted time. Depends on items 4 and 6.
 
 Two corrections to live artifacts, independent of the above:
 
@@ -650,14 +670,6 @@ Two corrections to live artifacts, independent of the above:
   anchoring reportedly runs against Ethereum. Confirm whether these are
   distinct layers (Merkle-root anchoring vs document anchoring) and reconcile
   the published directory either way.
-
----
-
-**Protocol:** Consenti Agreement Protocol
-**Repository:** `github.com/consenti-ai/agreement-protocol`
-**Governance:** BDFL + RFC process
-**License:** MIT — spec and reference implementations
-**Contact:** eric@blocksee.co
 
 ---
 
@@ -694,10 +706,11 @@ revocation, and the same backdating defeats the expiry check.)*
 
 - The time a record asserts (`acceptor.accepted_at`) is untrusted. It is
   written by the party whose authority is in question.
-- A **trusted time** is one bound to `agreement_hash` by a third party: the
-  block time of the anchor carrying the hash, the `genTime` of an RFC 3161
-  token over the hash, or the block time of an x402 settlement whose payment
-  nonce commits to the hash (§17.5). Verifiers MUST derive it from the anchor,
+- A **trusted time** is one bound to `agreement_hash` by a third party:
+  `anchor`, the block time of the anchor carrying the hash; `rfc3161`, the
+  `genTime` of an RFC 3161 token over the hash; or `x402_settlement`, the
+  block time of an x402 settlement whose payment nonce commits to the hash
+  (§17.5). The reference verifier derives only `anchor` today. Verifiers MUST derive it from the anchor,
   token or transaction themselves. They MUST NOT accept it as a free input
   from the caller, and MUST NOT use the record's own `anchoring.anchored_at`,
   which is self-reported.
@@ -716,8 +729,12 @@ revocation, and the same backdating defeats the expiry check.)*
 
 The consequence should be stated plainly to anyone relying on these records:
 **without a trusted time, a record can verify, but it cannot win a dispute
-over whether it came before a revocation.** A prompt anchor narrows the window
-to minutes and usually resolves it. Disputes about ordering need anchoring.
+over whether it came before a revocation.** It also degrades. Its window runs
+to whenever it is checked, so once the credential expires, or the delegation
+is revoked for any reason, an unanchored record becomes indeterminate and
+stays that way. An `authorized` record degrades within minutes, when its
+Authorization Event expires (§5.1). A prompt anchor fixes the window's end
+and stops the degradation. Records meant to be relied on later need anchoring.
 
 Residual: an agent can also *post*-date a record. That only makes expiry and
 revocation checks stricter, but it can hide a commitment signed before the
@@ -741,3 +758,277 @@ through the window's end when `updated_at` is within a freshness tolerance of
 it (verifier parameter, default 300 seconds), and report `unknown` otherwise.
 A list that only changes `updated_at` when an entry is added will make every
 unanchored verification come back `unknown`.
+
+---
+
+## 17. x402 Binding Profile (Draft)
+
+*Status: proposal, not implemented. Field and header names follow x402 v2.
+Every MUST in this section is a proposed rule for the profile, not a
+description of running code.*
+
+### 17.1 Why a binding profile
+
+x402 settles a payment in one round trip: the seller answers 402 with
+`PAYMENT-REQUIRED`, and the buyer retries with `PAYMENT-SIGNATURE`. §10's
+flow (409, then 403, then 402) costs two extra round trips and two status
+codes x402 does not have. Inside x402 this profile replaces that flow with
+extensions on the two existing messages. The ordering principle survives as
+a rule on the seller: **it MUST NOT settle until terms and authority have
+verified.** The order is enforced as an order of checks rather than an order
+of HTTP responses. Outside x402 (plain HTTP, MCP), §10 is unchanged.
+
+### 17.2 What the profile adds to an x402 payment
+
+x402 v2 answers whether a payment was made and settled. It does not say who
+the paying agent acts for, what that party allowed it to do, or what terms
+the payment was made under. The profile adds those at each step of the
+exchange.
+
+| Point in the x402 exchange | x402 v2 carries | This profile adds |
+|---|---|---|
+| Seller's 402 (`PAYMENT-REQUIRED`) | Accepted payment options, resource, `extensions` | The terms the seller requires, and the authority status it demands above a value (§17.3) |
+| Between the 402 and the retry | Nothing; the client picks an option and signs | Above the principal's threshold, an Authorization Event obtained out of band from the principal (§17.6) |
+| Buyer's retry (`PAYMENT-SIGNATURE`) | The signed payment payload, `extensions` | The signed acceptance record and authority object, references to the Delegation Credential and any Authorization Event, and the nonce salt (§17.3) |
+| The payment itself | Payer, payee, amount, nonce | A principal-signed link from the credential to the paying account (§17.4), and a nonce that commits to the agreement (§17.5) |
+| Facilitator verify and settle | Payment validity and settlement | Optional binding checks, never a holder of the credential by default (§17.7) |
+
+The result answers the question payment protocols leave open: not only
+whether the agent could pay, but whether it could accept *these terms* for a
+named principal. That is the question an adjudicator asks after something
+goes wrong.
+
+### 17.3 Transport in x402 extensions
+
+The objects below show the content of a `consenti` extension. They are
+wrapped in whatever envelope the x402 v2 extension convention requires.
+
+Seller, in the `PaymentRequired` object (sent base64-encoded in the
+`PAYMENT-REQUIRED` header):
+
+```json
+{
+  "extensions": {
+    "consenti": {
+      "version": "consenti/authorization/v0.2",
+      "terms_ref": {
+        "terms_url": "https://seller.example/.well-known/agreements/api-v3.json",
+        "terms_hash": "sha256:8fa574…"
+      },
+      "requires_authority": {
+        "minimum_status": "delegated_only",
+        "above_value": { "amount": "100.00", "currency": "USD" }
+      }
+    }
+  }
+}
+```
+
+Buyer, in the `PaymentPayload` (sent in the `PAYMENT-SIGNATURE` header):
+
+```json
+{
+  "extensions": {
+    "consenti": {
+      "version": "consenti/authorization/v0.2",
+      "acceptance": { "…": "signed acceptance record, authority object included (§6)" },
+      "agreement_hash": "sha256:…",
+      "payment_seq": 0,
+      "credential": { "ref": "https://buyer.example/.well-known/delegations/dlg_7f3a9c21.json",
+                      "credential_hash": "sha256:…" },
+      "authorization_event": { "ref": "…", "event_hash": "sha256:…" },
+      "nonce_salt": "base64url…"
+    }
+  }
+}
+```
+
+The seller publishes `terms_hash`, not `agreement_hash`. The agreement hash
+covers the acceptance record (acceptor, time, terms), which only exists once
+the buyer accepts. The buyer builds and signs the acceptance record, computes
+its `agreement_hash`, and only then derives the payment nonce (§17.5).
+
+Rules:
+
+- The acceptance record's `terms_ref.terms_hash` MUST equal the
+  `terms_hash` the seller published in the 402.
+- The extension's `credential_hash` MUST equal
+  `authority.delegation.credential_hash` in the acceptance record.
+- The acceptance record travels inline because the seller must verify the
+  agent's signature before settling. The credential and Authorization Event
+  MAY travel by reference with their hashes, to keep the header small; the
+  seller fetches and checks the hash.
+- Per §13 (directory scope injection), the credential reference MUST resolve
+  under the principal's own domain or DID document. A credential supplied
+  only by the buyer's agent, with no principal-controlled source, is not
+  accepted.
+- A seller that receives a payment payload without the `consenti` extension,
+  when its `PAYMENT-REQUIRED` demanded one, MUST NOT settle. It returns 402
+  again with the same requirements. It does not return 409 or 403.
+
+### 17.4 Binding the paying account to the credential
+
+On EVM networks the x402 payment is usually signed by an ordinary wallet
+with a secp256k1 key, and the payload names the payer as
+`authorization.from`. The credential's `agent.public_key_ref` is a P-256
+(ES256) key, and the reference verifier accepts nothing else (A6). Without a further rule, a verifier holds a valid
+delegation and a valid payment with no cryptographic link between them, the
+situation Level 1A step 4 exists to prevent.
+
+v0.2 closes this with a principal-signed list rather than a new signature
+algorithm:
+
+```json
+"agent": {
+  "identifier": { "type": "erc8004", "value": "eip155:8453:0xIdentityRegistry…#42" },
+  "public_key_ref": "did:web:acme.example#agent-key-3",
+  "payment_accounts": ["eip155:8453:0x4b1e…"]
+}
+```
+
+- `payment_accounts` is an optional list of CAIP-10 account identifiers.
+  Because it sits inside the credential, the principal's signature covers it.
+- In an x402 flow, a verifier MUST confirm the payment's payer
+  (`authorization.from`, or the scheme's equivalent) is in
+  `agent.payment_accounts`, and that the matching entry's CAIP-2 chain is the
+  payment's `network`. EVM addresses compare case-insensitively. A
+  credential without the field cannot bind an x402 payment, and the verifier
+  reports the payment as unbound.
+- Smart-contract accounts (ERC-4337, EIP-1271) are listed by address too,
+  but whether they can pay through ERC-3009 depends on the token accepting
+  contract signatures and the facilitator supporting them. Passkey-based
+  accounts sign with P-256 keys, not secp256k1.
+- A shared treasury account listed for several agents still binds the payment
+  to the principal, but no longer to one agent. Principals who need per-agent
+  attribution list a separate account per agent.
+
+The chain of evidence then runs: the principal signs the credential, which
+names both the agent's signing key and its paying account; the signing key
+signs the agreement; the paying account signs a payment whose nonce commits
+to that agreement (§17.5).
+
+Alternative considered: allowing ES256K and EIP-712 signatures so the paying
+wallet signs the agreement directly. It removes one hop, but it ties
+agreement signing to wallet custody and puts two algorithms in the verifier.
+Deferred to v0.3 (§14).
+
+### 17.5 Binding the payment to the agreement, and a trusted time for free
+
+In the x402 exact scheme on EVM, the payment is an ERC-3009
+`transferWithAuthorization`. Its `nonce` is 32 bytes the payer chooses, the
+payer signs it, and the token contract records it on-chain in the
+`AuthorizationUsed(authorizer, nonce)` event. This profile fixes how the
+nonce is chosen:
+
+```
+nonce = SHA-256( "consenti/x402/v0.2" || agreement_hash || nonce_salt || uint64_be(payment_seq) )
+```
+
+- `agreement_hash` is the raw 32-byte hash. `payment_seq` starts at 0 and
+  increments for each payment under the same agreement, which keeps nonces
+  unique per authorizer as ERC-3009 requires.
+- `nonce_salt` MUST be at least 16 random bytes chosen by the buyer, carried
+  base64url-encoded in the payload extension (§17.3) and in the parties'
+  Layer 2 records, and hashed as raw bytes. Verifiers MUST reject a missing
+  or short salt. The agreement hash is public on the anchor, so without a salt
+  anyone reading the chain could link the anchor to the payer's wallet.
+- A verifier recomputes the nonce, finds the settlement transaction, and
+  confirms it succeeded.
+- The nonce binds *which* agreement; it says nothing about the amount or the
+  payee. The verifier MUST also confirm that the transfer's recipient is a
+  `payTo` the seller declared somewhere it signed (its agreements directory or
+  the terms), not only in the 402, that the asset and network are the ones the
+  seller offered, and that the amount is within the agreement's price and the
+  credential's scope. For scope and threshold checks (`max_value`,
+  `requires_authorization_above`, `aggregate_cap`), the commitment's value is
+  the larger of the agreement's stated value and the sum of payments bound to
+  it. Otherwise an agent could accept a small agreement and pay a large sum
+  under its nonce.
+
+This yields two things the protocol otherwise has to build:
+
+1. **Proof that this payment was made under this agreement**, signed by the
+   paying account and recorded by the token contract, once the checks above
+   also confirm amount, payee, asset and network.
+2. **A trusted commitment time under A4.** The settlement block time is bound
+   to `agreement_hash` by the nonce, and it is set by the chain, not the
+   agent. It closes the commitment window seconds after acceptance, which
+   resolves almost every revocation-ordering dispute in an x402 flow without a
+   separate anchoring step. A4 lists it as source `x402_settlement`.
+
+Limits, stated plainly: this works for assets that implement ERC-3009 (USDC
+does). x402 also supports Permit2 for other tokens and non-EVM networks,
+whose nonce rules differ. Bindings for those are open (§14). Where no binding
+exists, the payment is reported as unbound and the commitment falls back to
+other trusted-time sources or to the untrusted window.
+
+### 17.6 Human approval above threshold
+
+When the commitment value exceeds `scope.requires_authorization_above`, the
+buyer's agent MUST obtain an Authorization Event (§5) before signing the
+payment, after the 402 arrives and before the retry. It is not an x402
+message, and it should not become one: the point of the event is that it
+reaches the principal through a channel the agent does not control.
+
+Two timing consequences:
+
+- Human approval takes minutes. A seller's `maxTimeoutSeconds` may be shorter.
+  The agent SHOULD request the event, wait for the decision, and then request
+  fresh payment requirements rather than reuse expired ones.
+- The event's own short expiry (§5.1, reference default fifteen minutes)
+  sits inside the commitment window like any other boundary. An event that
+  expired before the window closed gives an indeterminate result under A4.
+
+`presented.summary_hash` (§5.2) records what x402 has no place for: what the
+approving human was actually shown.
+
+### 17.7 The facilitator
+
+A facilitator runs verify and settle, and is a natural place to check the
+bindings. This profile allows that and does not require it.
+
+- A facilitator MAY confirm, before settling, that the payer is in
+  `agent.payment_accounts` and that the nonce matches §17.5. Doing so
+  requires the credential, the agreement hash and the salt.
+- A facilitator that does this holds Layer 2 material (§7), which weakens the
+  zero-custody property. It MUST NOT retain that material after settlement,
+  and a deployment using one MUST say so in its trust-assumption disclosure.
+- The seller remains the relying party. A facilitator's check does not
+  replace the seller's Level 1A verification.
+
+### 17.8 Grant and limits in one document
+
+v0.2 signs the grant (who may act for whom, until when) and its limits
+(scope, value caps, prohibited clauses) together in one credential. Some
+delegation designs keep limits in a separate document, because limits change
+more often than grants. A profile that separates them MUST meet three
+conditions:
+
+1. A limits document MUST be signed by the principal under A2 and MUST name
+   both `delegation_id` and `credential_hash`. Otherwise looser limits can be
+   attached to a valid grant, the substitution the v0.2 tests already guard
+   against for credentials.
+2. Limits documents carry `effective_from` and are evaluated over the
+   commitment window, exactly as A4 evaluates revocation. A limits change
+   inside the window is indeterminate. Separating limits brings the
+   backdating problem to limits as well.
+3. A separate limits document MAY only narrow the grant's scope. Widening
+   requires a new credential. This keeps every grant's maximum authority
+   fixed at the moment the principal signed it.
+
+### 17.9 Open questions for this profile
+
+- The extension key and envelope, under whatever convention x402 v2 settles
+  on for extensions.
+- Nonce bindings for Permit2 and non-EVM networks (§17.5, §14).
+- Size limits for an inline acceptance record in a header, and when to send
+  it by reference instead.
+- Whether facilitator checks (§17.7) belong in the profile at all.
+
+---
+
+**Protocol:** Consenti Agreement Protocol
+**Repository:** `github.com/consenti-ai/agreement-protocol`
+**Governance:** BDFL + RFC process
+**License:** MIT — spec and reference implementations
+**Contact:** eric@blocksee.co

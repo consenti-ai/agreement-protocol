@@ -42,6 +42,7 @@ export {
   verifyAgentBinding,
   resolveCommitmentWindow,
   commitmentFromAnchor,
+  verifyDelegationForRecord,
 } from './authority.js';
 
 export type {
