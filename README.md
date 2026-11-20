@@ -61,6 +61,9 @@ TIMESTAMP           TYPE    ACCEPTOR                    TERMS         STATUS
 | [Agreement Schema v0.1](schemas/agreement-schema-v0.1.json) | Canonical JSON Schema for acceptance records |
 | [Discovery Spec v0.1](specs/well-known-agreements-spec.md) | `.well-known/agreements.json` discovery + HTTP 409 enforcement |
 | [Privacy Architecture v0.1](specs/agreement-privacy-architecture.md) | Commitment/content separation, selective disclosure, encrypted vault |
+| [Authority to Accept Terms v0.3](specs/authority-to-accept-terms-v0.3.md) (draft) | Whether an agent was authorized to accept specific terms, using grants from existing standards (VCs, AAP, AAuth, AP2, ERC-7710) or a native credential |
+| [x402 Binding v0.1](specs/x402-binding-v0.1.md) (draft, not implemented) | Carrying terms and authority in x402 payments, and binding the payment to the agreement |
+| [Delegation & Principal Authorization v0.2](specs/delegation-authorization-spec-v0.2.md) (superseded) | The native credential implemented in `src/authority.ts`; kept for verification of v0.2 records |
 
 ## Reference Verifier
 

@@ -1,6 +1,7 @@
 # Consenti Delegation & Principal Authorization Extension v0.2
 
-**Status:** Draft. §16 records amendments forced by the reference implementation and review; §17 is a proposed x402 binding, not implemented.
+**Status:** Superseded by [Consenti Authority to Accept Terms v0.3](./authority-to-accept-terms-v0.3.md), which keeps this document's credential as its native fallback and moves §17 to the [x402 Binding v0.1](./x402-binding-v0.1.md). Retained because the reference verifier implements it and v0.2 records remain verifiable.
+**Previous status:** Draft. §16 records amendments forced by the reference implementation and review; §17 is a proposed x402 binding, not implemented.
 **Protocol ID:** `consenti/authorization/v0.2`
 **Extends:** [Discovery Spec v0.1](./well-known-agreements-spec.md) · [Privacy Architecture v0.1](./agreement-privacy-architecture.md) · Agreement Schema v0.1
 **Maintainer:** Consenti (FHBK Technologies, Inc.)
