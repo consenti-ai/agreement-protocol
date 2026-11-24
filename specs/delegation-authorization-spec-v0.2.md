@@ -764,6 +764,8 @@ unanchored verification come back `unknown`.
 
 ## 17. x402 Binding Profile (Draft)
 
+> **Superseded by the [x402 Binding v0.1](./x402-binding-v0.1.md). Retained for the record; do not implement from this section.**
+
 *Status: proposal, not implemented. Field and header names follow x402 v2.
 Every MUST in this section is a proposed rule for the profile, not a
 description of running code.*
