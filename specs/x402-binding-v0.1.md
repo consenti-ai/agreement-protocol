@@ -1,6 +1,6 @@
 # Consenti x402 Binding v0.1
 
-**Status:** Draft proposal. **Not implemented.** Every MUST in this document is a proposed rule, not a description of running code.
+**Status:** Superseded by [Consenti x402 Binding v0.2](./x402-binding-v0.2.md). Retained for reference. Draft proposal. **Not implemented.** Every MUST in this document is a proposed rule, not a description of running code.
 **Binding ID:** `consenti/x402-binding/v0.1`
 **Requires:** [Consenti Authority to Accept Terms v0.3](./authority-to-accept-terms-v0.3.md)
 **Carries:** x402 v2 (Linux Foundation). Field and header names follow x402 v2.
