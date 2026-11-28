@@ -3,10 +3,10 @@
 ### Vocabulary, Verification, and Mappings to Existing Authorization Standards
 
 **Status:** Draft. Supersedes *Consenti Delegation & Principal Authorization Extension v0.2*. Section 17 states what is implemented and what is not.
-**Revised:** 19 November 2026, adding the AAuth mapping (§5.2).
+**Revised:** 19 November 2026, adding the AAuth mapping (§5.2). 27 November 2026, adding `asset_valuation` (§4.2, §4.4) for the x402 Binding v0.2.
 **Protocol ID:** `consenti/authority/v0.3`
 **Extends:** [Discovery Spec v0.1](./well-known-agreements-spec.md) · [Privacy Architecture v0.1](./agreement-privacy-architecture.md) · Agreement Schema v0.1
-**Companion document:** [Consenti x402 Binding v0.1](./x402-binding-v0.1.md) (draft, not implemented)
+**Companion document:** [Consenti x402 Binding v0.2](./x402-binding-v0.2.md) (draft, not implemented; supersedes [v0.1](./x402-binding-v0.1.md))
 **Maintainer:** Consenti (FHBK Technologies, Inc.)
 **License:** MIT
 
@@ -94,7 +94,10 @@ This document defines:
   "aggregate_cap": { "amount": "50000.00", "currency": "USD", "period": "P30D" },
   "prohibited_clauses": ["arbitration_waiver", "perpetual_license", "auto_renew"],
   "requires_approval_above": { "amount": "1000.00", "currency": "USD" },
-  "payment_accounts": ["eip155:8453:0x4b1e…"]
+  "payment_accounts": ["eip155:8453:0x4b1e…"],
+  "asset_valuation": [
+    { "asset": "eip155:8453/erc20:0x8335…", "currency": "USD", "rate": "1" }
+  ]
 }
 ```
 
@@ -111,6 +114,7 @@ This document defines:
 | `prohibited_clauses` | no | Clause types the agent may not accept at any value. |
 | `requires_approval_above` | no | Value above which an Approval Event (§6) is also required. Absent means the grant alone suffices up to `max_value`. |
 | `payment_accounts` | no | CAIP-10 accounts the agent pays from. Payment-rail bindings may require it. Because it sits inside the grant, the principal's signature covers it. |
+| `asset_valuation` | no | List of `{asset, currency, rate}` entries: the value of one whole unit of a CAIP-19 asset in the currency of the grant's limits, as declared by the principal. Used to compare payments in that asset with `max_value`, `aggregate_cap` and `requires_approval_above`. Verifiers use the declared rate, never a market price, so results are reproducible. Without an entry for a payment's asset, a limit in another currency cannot be checked and the scope step returns `unknown`. |
 
 The object MUST be covered by the principal's signature in whatever authority source carries it. An `accept_terms` object the agent or counterparty could edit is not a scope.
 
@@ -134,6 +138,7 @@ Where one `accept_terms` object is derived from another (a sub-delegation, or th
 | `prohibited_clauses` | A superset. A child may prohibit more, never less. |
 | `requires_approval_above` | Less than or equal. Present in the child if present in the parent. A child may require approval sooner, never later. |
 | `payment_accounts` | A subset. |
+| `asset_valuation` | A subset, with identical rates. A child may not revalue an asset. |
 
 A verifier evaluating a derived object MUST check it against every ancestor it can resolve and MUST report the scope step as `fail` on any violation and `unknown` if an ancestor cannot be resolved.
 
